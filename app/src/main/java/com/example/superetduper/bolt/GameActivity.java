@@ -49,6 +49,8 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
     private static final int STATE_INGAME = 2;
     private static final int STATE_GAME_ENDED = 3;
 
+    private static final byte ACKNOWLEDGE = 6;
+
     private final BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
     private BluetoothGatt mBluetoothGatt;
     private BluetoothGattCharacteristic mGattCharacteristic;
@@ -58,6 +60,8 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
     private TextView countDownTimer;
 
     private int mState = STATE_CONNECTING;
+
+    private int mLedNumberToPress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,14 +106,15 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
             //Bluetooth is disabled
             Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
             startActivityForResult(enableBtIntent, BLUETOOTH_ENABLE_RESULT_CODE);
+            return;
         }
 
         if (mBluetoothGatt != null){
             mBluetoothGatt.connect();
-            mHandler.sendMessage(Message.obtain(null, MSG_PROGRESS, "Connecting on resume"));
+            sendMessageToHandler(MSG_PROGRESS, "Connecting on resume");
         } else {
             mBluetoothAdapter.startLeScan(this);
-            mHandler.sendMessage(Message.obtain(null, MSG_PROGRESS, "Searching for devices"));
+            sendMessageToHandler(MSG_PROGRESS, "Searching for devices");
         }
     }
 
@@ -137,8 +142,8 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
     public void onLeScan(BluetoothDevice bluetoothDevice, int i, byte[] bytes) {
         if (bluetoothDevice.getAddress().equals(BOARD_ADDRESS)) {
             mBluetoothAdapter.stopLeScan(this);
-            mBluetoothGatt = bluetoothDevice.connectGatt(getApplicationContext(), false, mGattCallback);
-            mHandler.sendMessage(Message.obtain(null, MSG_PROGRESS, "Connecting to board"));
+            mBluetoothGatt = bluetoothDevice.connectGatt(getApplicationContext(), true, mGattCallback);
+            sendMessageToHandler(MSG_PROGRESS,"Connecting to board");
         }
     }
 
@@ -148,13 +153,12 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
                                             int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 if (gatt.discoverServices()) {
-                    mHandler.sendMessage(Message.obtain(null, MSG_PROGRESS, "Discovering services"));
+                    sendMessageToHandler(MSG_PROGRESS, "Discovering services");
                 } else {
                     Log.w(LOG_TAG, "Failed to start discovering services");
                 }
-
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                mHandler.sendMessage(Message.obtain(null, MSG_GATT_DISCONNECTED));
+                sendMessageToHandler(MSG_GATT_DISCONNECTED);
             }
         }
 
@@ -177,7 +181,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
                 }
 
                 gatt.setCharacteristicNotification(mGattCharacteristic, true);
-                mHandler.sendMessage(Message.obtain(null, MSG_GATT_CONNECTED));
+                sendMessageToHandler(MSG_GATT_CONNECTED);
 
             } else {
                 Log.w(LOG_TAG, "onServicesDiscovered received: " + status);
@@ -188,7 +192,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicRead(gatt, characteristic, status);
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                mHandler.sendMessage(Message.obtain(null, MSG_RECEIVED_DATA, characteristic.getValue()));
+                sendMessageToHandler(MSG_RECEIVED_DATA, characteristic.getValue());
             } else {
                 Log.w(LOG_TAG, "Failed to read characteristic");
             }
@@ -197,7 +201,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             super.onCharacteristicChanged(gatt, characteristic);
-            mHandler.sendMessage(Message.obtain(null, MSG_RECEIVED_DATA, characteristic.getValue()));
+            sendMessageToHandler(MSG_RECEIVED_DATA, characteristic.getValue());
         }
 
         @Override
@@ -211,13 +215,21 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         }
     };
 
-    private void sendPacket(byte[] value) {
+    private void sendPacket(String value) {
         if (mBluetoothGatt != null) {
-            mGattCharacteristic.setValue(value);
+            mGattCharacteristic.setValue(value.getBytes());
             mBluetoothGatt.writeCharacteristic(mGattCharacteristic);
         } else {
             Log.w(LOG_TAG, "Failed to write characteristic, connection is null");
         }
+    }
+
+    private void sendMessageToHandler(int what, Object obj){
+        mHandler.sendMessage(Message.obtain(null, what, obj));
+    }
+
+    private void sendMessageToHandler(int what){
+        mHandler.sendMessage(Message.obtain(null, what));
     }
 
     private final Handler mHandler = new Handler(Looper.getMainLooper()) {
@@ -258,23 +270,33 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
 
             if (Packet.BUTTON_PRESSED == packet.getCommandByte()) {
                 buttonPressed(packet.getButtonNumber());
+            } else {
+                Log.w(LOG_TAG, "Could not parse data");
             }
         }
     }
 
     private void buttonPressed(int buttonNumeber){
+        Log.i(LOG_TAG, "Button number " + buttonNumeber + " pressed");
+        if (buttonNumeber == mLedNumberToPress && mState == STATE_INGAME){
+            String dataToSend = String.valueOf(ACKNOWLEDGE);
+            dataToSend += Packet.getPacketLedOff(mLedNumberToPress);
+            mLedNumberToPress = getRandomLedNumber();
+            dataToSend += Packet.getPacketLedOn(mLedNumberToPress);
+            dataToSend += Packet.getPacketShift();
 
+            sendPacket(dataToSend);
+        }
     }
 
     private static boolean isAcknowledge(byte[] packet){
-        return packet.length == 1 && packet[0] == Packet.ACKNOWLEDGE;
+        return packet.length == 1 && packet[0] == ACKNOWLEDGE;
     }
 
     private void gotAcknowledged(){
         Log.i(LOG_TAG, "Received acknowledge");
         if (mState == STATE_TESTING_CONNECTION){
             statusBox.setVisibility(View.GONE);
-            mState = STATE_INGAME;
             startGame();
         }
     }
@@ -292,15 +314,21 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         public void onFinish() {
             countDownTimer.setText("0.000");
             mState = STATE_GAME_ENDED;
+            String dataToSend = Packet.getPacketLedOff(mLedNumberToPress);
+            dataToSend += Packet.getPacketEnd();
+
+            sendPacket(dataToSend);
         }
     };
 
     private void startGame(){
+        mState = STATE_INGAME;
         mGameTimer.start();
-        sendPacket(Packet.getPacketLedOn(getRandomLedNumber()));
+        mLedNumberToPress = getRandomLedNumber();
+        sendPacket(Packet.getPacketLedOn(mLedNumberToPress) + Packet.getPacketShift());
     }
 
-    private int getRandomLedNumber(){
+    private static int getRandomLedNumber(){
         return (int) (Math.random() * 64);
     }
 

@@ -6,8 +6,6 @@ class Packet {
     private static final byte START_OF_PACKET = 2;
     private static final byte END_OF_PACKET = 3;
 
-    static final byte ACKNOWLEDGE = 6;
-
     private static final byte BEGIN_PACKET = 66;
     private static final byte LED_ON = 79;
     private static final byte LED_OFF = 73;
@@ -16,7 +14,6 @@ class Packet {
 
     static final byte BUTTON_PRESSED = 80;
 
-    private String packet;
     private byte command;
     private int buttonNumber;
 
@@ -25,10 +22,9 @@ class Packet {
     }
 
     private Packet(String packet){
-        this.packet = packet.substring(1, packet.length() - 1);
-        this.command = (byte) this.packet.charAt(0);
-        if (this.packet.length() > 1){
-            this.buttonNumber = Integer.valueOf(this.packet.substring(1));
+        this.command = (byte) packet.charAt(1);
+        if (packet.length() > 2){
+            this.buttonNumber = Integer.valueOf(packet.substring(2));
         }
     }
 
@@ -40,31 +36,33 @@ class Packet {
         return command;
     }
 
-    private byte[] getPacketBytes(){
-        return enclosePacket(packet).getBytes();
+    static String getPacketBegin(){
+        return encloseData(BEGIN_PACKET);
     }
 
-    private static String enclosePacket(String packet){
-        return START_OF_PACKET + packet + END_OF_PACKET;
+    static String getPacketEnd(){
+        return encloseData(END_GAME);
     }
 
-    static byte[] getPacketBegin(){
-        return new Packet(BEGIN_PACKET + "").getPacketBytes();
+    static String getPacketLedOn(int ledNumber){
+        return encloseData(LED_ON + String.valueOf(ledNumber));
     }
 
-    static byte[] getPacketEnd(){
-        return new Packet(END_GAME + "").getPacketBytes();
+    static String getPacketLedOff(int ledNumber){
+        return encloseData(LED_OFF + String.valueOf(ledNumber));
     }
 
-    static byte[] getPacketLedOn(int ledNumber){
-        return new Packet(LED_ON + String.valueOf(ledNumber)).getPacketBytes();
+    static String getPacketShift(){
+        return encloseData(SHIFT_OUT);
     }
 
-    static byte[] getPacketLedOff(int ledNumber){
-        return new Packet(LED_OFF + String.valueOf(ledNumber)).getPacketBytes();
+    private static String encloseData(byte data){
+        return encloseData(data + "");
     }
 
-    static byte[] getPacketShift(){
-        return new Packet(SHIFT_OUT + "").getPacketBytes();
+    private static String encloseData(String data){
+        return START_OF_PACKET + data + END_OF_PACKET;
     }
+
+
 }
