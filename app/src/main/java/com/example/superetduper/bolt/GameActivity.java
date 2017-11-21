@@ -49,7 +49,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
     private static final int STATE_INGAME = 2;
     private static final int STATE_GAME_ENDED = 3;
 
-    private static final byte ACKNOWLEDGE = 6;
+    private static final char ACKNOWLEDGE = 6;
 
     private final BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
     private BluetoothGatt mBluetoothGatt;
@@ -109,7 +109,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
             return;
         }
 
-        if (mBluetoothGatt != null){
+        if (mBluetoothGatt != null) {
             mBluetoothGatt.connect();
             sendMessageToHandler(MSG_PROGRESS, "Connecting on resume");
         } else {
@@ -143,7 +143,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         if (bluetoothDevice.getAddress().equals(BOARD_ADDRESS)) {
             mBluetoothAdapter.stopLeScan(this);
             mBluetoothGatt = bluetoothDevice.connectGatt(getApplicationContext(), true, mGattCallback);
-            sendMessageToHandler(MSG_PROGRESS,"Connecting to board");
+            sendMessageToHandler(MSG_PROGRESS, "Connecting to board");
         }
     }
 
@@ -207,7 +207,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicWrite(gatt, characteristic, status);
-            if (status == BluetoothGatt.GATT_SUCCESS){
+            if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(LOG_TAG, "Sent packet : " + characteristic.getStringValue(0));
             } else {
                 Log.w(LOG_TAG, "Failed sending packet. Status : " + status);
@@ -224,11 +224,11 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         }
     }
 
-    private void sendMessageToHandler(int what, Object obj){
+    private void sendMessageToHandler(int what, Object obj) {
         mHandler.sendMessage(Message.obtain(null, what, obj));
     }
 
-    private void sendMessageToHandler(int what){
+    private void sendMessageToHandler(int what) {
         mHandler.sendMessage(Message.obtain(null, what));
     }
 
@@ -239,7 +239,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
                 case MSG_PROGRESS:
                     String status = (String) msg.obj;
                     updateStatus(status);
-                    Log.i(LOG_TAG, "Handler : "  + status);
+                    Log.i(LOG_TAG, "Handler : " + status);
                     break;
                 case MSG_GATT_DISCONNECTED:
                     Log.i(LOG_TAG, "Handler : Disconnected");
@@ -256,31 +256,26 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
                         return;
                     }
 
-                    parseData((byte[]) msg.obj);
+                    parseData(new String((byte[]) msg.obj));
                     Log.i(LOG_TAG, "Received packet : " + new String((byte[]) msg.obj));
             }
         }
     };
 
-    private void parseData(@NonNull byte[] data){
-        if (isAcknowledge(data)){
+    private void parseData(@NonNull String data) {
+        if (isAcknowledge(data)) {
             gotAcknowledged();
+        } else if (Packet.BUTTON_PRESSED == Packet.getCommandByte(data) && Packet.isValid(data)) {
+            buttonPressed(Packet.getButtonNumber(data));
         } else {
-            Packet packet = new Packet(data);
-
-            if (Packet.BUTTON_PRESSED == packet.getCommandByte()) {
-                buttonPressed(packet.getButtonNumber());
-            } else {
-                Log.w(LOG_TAG, "Could not parse data");
-            }
+            Log.w(LOG_TAG, "Could not parse data");
         }
     }
 
-    private void buttonPressed(int buttonNumeber){
-        Log.i(LOG_TAG, "Button number " + buttonNumeber + " pressed");
-        if (buttonNumeber == mLedNumberToPress && mState == STATE_INGAME){
-            String dataToSend = String.valueOf(ACKNOWLEDGE);
-            dataToSend += Packet.getPacketLedOff(mLedNumberToPress);
+    private void buttonPressed(int buttonNumber) {
+        Log.i(LOG_TAG, "Button number " + buttonNumber + " pressed");
+        if (buttonNumber == mLedNumberToPress && mState == STATE_INGAME) {
+            String dataToSend = ACKNOWLEDGE + Packet.getPacketLedOff(mLedNumberToPress);
             mLedNumberToPress = getRandomLedNumber();
             dataToSend += Packet.getPacketLedOn(mLedNumberToPress);
             dataToSend += Packet.getPacketShift();
@@ -289,13 +284,13 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         }
     }
 
-    private static boolean isAcknowledge(byte[] packet){
-        return packet.length == 1 && packet[0] == ACKNOWLEDGE;
+    private static boolean isAcknowledge(String packet) {
+        return packet.length() == 1 && packet.charAt(0) == ACKNOWLEDGE;
     }
 
-    private void gotAcknowledged(){
+    private void gotAcknowledged() {
         Log.i(LOG_TAG, "Received acknowledge");
-        if (mState == STATE_TESTING_CONNECTION){
+        if (mState == STATE_TESTING_CONNECTION) {
             statusBox.setVisibility(View.GONE);
             startGame();
         }
@@ -307,7 +302,7 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
 
         @Override
         public void onTick(long l) {
-            countDownTimer.setText(formatter.format(l/1000.0));
+            countDownTimer.setText(formatter.format(l / 1000.0));
         }
 
         @Override
@@ -321,14 +316,14 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         }
     };
 
-    private void startGame(){
+    private void startGame() {
         mState = STATE_INGAME;
         mGameTimer.start();
         mLedNumberToPress = getRandomLedNumber();
         sendPacket(Packet.getPacketLedOn(mLedNumberToPress) + Packet.getPacketShift());
     }
 
-    private static int getRandomLedNumber(){
+    private static int getRandomLedNumber() {
         return (int) (Math.random() * 64);
     }
 

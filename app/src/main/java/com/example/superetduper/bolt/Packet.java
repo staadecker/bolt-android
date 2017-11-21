@@ -3,37 +3,27 @@ package com.example.superetduper.bolt;
 
 class Packet {
 
-    private static final byte START_OF_PACKET = 2;
-    private static final byte END_OF_PACKET = 3;
+    private static final char START_OF_PACKET = 2;
+    private static final char END_OF_PACKET = 3;
 
-    private static final byte BEGIN_PACKET = 66;
-    private static final byte LED_ON = 79;
-    private static final byte LED_OFF = 73;
-    private static final byte SHIFT_OUT = 83;
-    private static final byte END_GAME = 69;
+    private static final char BEGIN_PACKET = 66;
+    private static final char LED_ON = 79;
+    private static final char LED_OFF = 73;
+    private static final char SHIFT_OUT = 83;
+    private static final char END_GAME = 69;
 
     static final byte BUTTON_PRESSED = 80;
 
-    private byte command;
-    private int buttonNumber;
-
-    Packet(byte[] packet){
-        this(new String(packet));
+    static int getButtonNumber(String packet){
+        return Integer.valueOf(packet.substring(2, packet.length() -1));
     }
 
-    private Packet(String packet){
-        this.command = (byte) packet.charAt(1);
-        if (packet.length() > 2){
-            this.buttonNumber = Integer.valueOf(packet.substring(2));
-        }
+    static char getCommandByte(String packet){
+        return packet.charAt(1);
     }
 
-    int getButtonNumber(){
-        return buttonNumber;
-    }
-
-    byte getCommandByte(){
-        return command;
+    static boolean isValid(String packet){
+        return 3 <= packet.length() && packet.length() <=5 && packet.charAt(0) == START_OF_PACKET && packet.charAt(packet.length() - 1) == END_OF_PACKET;
     }
 
     static String getPacketBegin(){
@@ -56,13 +46,11 @@ class Packet {
         return encloseData(SHIFT_OUT);
     }
 
-    private static String encloseData(byte data){
+    private static String encloseData(char data){
         return encloseData(data + "");
     }
 
     private static String encloseData(String data){
         return START_OF_PACKET + data + END_OF_PACKET;
     }
-
-
 }

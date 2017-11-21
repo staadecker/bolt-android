@@ -43,6 +43,6 @@
             android:id="@+id/count_down_text_view"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="100dp"/>
+            android:textSize="100dp" />
     </LinearLayout>
 </android.support.constraint.ConstraintLayout>
