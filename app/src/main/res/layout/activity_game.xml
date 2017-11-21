@@ -7,10 +7,12 @@
     tools:context="com.example.superetduper.bolt.GameActivity">
 
     <LinearLayout
+        android:id="@+id/progressBox"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:gravity="center">
+        android:gravity="center"
+        android:visibility="visible">
 
         <ProgressBar
             android:id="@+id/progressBar"
@@ -22,8 +24,7 @@
             android:id="@+id/status_text_view"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:padding="16dp"
-            android:text="Searching for device" />
+            android:padding="16dp"/>
         <Button
             android:id="@+id/cancel_button"
             android:layout_width="wrap_content"
@@ -31,5 +32,17 @@
             android:text="Cancel"
             android:onClick="cancelConnect"/>
 
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center">
+        <TextView
+            android:id="@+id/count_down_text_view"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="100dp"/>
     </LinearLayout>
 </android.support.constraint.ConstraintLayout>
