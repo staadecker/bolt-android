@@ -1,22 +1,20 @@
 package com.example.superetduper.bolt;
 
+import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothGatt;
-import android.bluetooth.BluetoothGattCallback;
-import android.bluetooth.BluetoothGattCharacteristic;
-import android.bluetooth.BluetoothGattService;
-import android.bluetooth.BluetoothProfile;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.CountDownTimer;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.Message;
+import android.os.IBinder;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
@@ -26,42 +24,42 @@ import android.widget.Toast;
 
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
-import java.util.UUID;
 
-public class GameActivity extends AppCompatActivity implements BluetoothAdapter.LeScanCallback {
-
+public class GameActivity extends AppCompatActivity {
     private final static String LOG_TAG = GameActivity.class.getSimpleName();
 
     private static final int BLUETOOTH_ENABLE_RESULT_CODE = 100;
-
-    private final static String BOARD_ADDRESS = "00:15:83:31:67:97";
-    private final static UUID SERVICE_UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb");
-    private final static UUID CHARACTERISTIC_UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb");
-
-    private static final int MSG_PROGRESS = 1;
-    private final static int MSG_GATT_CONNECTED = 2;
-    private final static int MSG_GATT_DISCONNECTED = 3;
-
-    private static final int MSG_RECEIVED_DATA = 4;
 
     private static final int STATE_CONNECTING = 0;
     private static final int STATE_TESTING_CONNECTION = 1;
     private static final int STATE_INGAME = 2;
     private static final int STATE_GAME_ENDED = 3;
 
-    private static final char ACKNOWLEDGE = 6;
+    private int mState = STATE_CONNECTING;
 
-    private final BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-    private BluetoothGatt mBluetoothGatt;
-    private BluetoothGattCharacteristic mGattCharacteristic;
+    private BluetoothAdapter mBluetoothAdapter;
+    private BluetoothService mBluetoothService;
 
     private TextView statusTextView;
     private LinearLayout statusBox;
     private TextView countDownTimer;
 
-    private int mState = STATE_CONNECTING;
-
     private int mLedNumberToPress;
+
+
+    // Code to manage Service lifecycle.
+    private final ServiceConnection mServiceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName componentName, IBinder service) {
+            mBluetoothService = ((BluetoothService.LocalBinder) service).getService();
+            mBluetoothService.connect();
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName componentName) {
+            mBluetoothService = null;
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,26 +67,21 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         Log.i(LOG_TAG, "onCreate");
         setContentView(R.layout.activity_game);
 
-        /*
-         * We need to enforce that Bluetooth is first enabled, and take the
-         * user to settings to enable it if they have not done so.
-         */
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+            Toast.makeText(this, "Bluetooth LE not supported", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+
+        mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+
         if (mBluetoothAdapter == null) {
             Toast.makeText(this, "No Bluetooth Support", Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
 
-        /*
-         * Check for Bluetooth LE Support.  In production, our manifest entry will keep this
-         * from installing on these devices, but this will allow test devices or other
-         * sideloads to report whether or not the feature exists.
-         */
-        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
-            Toast.makeText(this, "No LE Support.", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
-        }
+        bindService(new Intent(this, BluetoothService.class), mServiceConnection, BIND_AUTO_CREATE);
 
         makeFullScreen();
 
@@ -100,192 +93,89 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
     @Override
     protected void onResume() {
         super.onResume();
+
         Log.i(LOG_TAG, "onResume");
 
         if (!mBluetoothAdapter.isEnabled()) {
             //Bluetooth is disabled
-            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            startActivityForResult(enableBtIntent, BLUETOOTH_ENABLE_RESULT_CODE);
-            return;
+            startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), BLUETOOTH_ENABLE_RESULT_CODE);
         }
 
-        if (mBluetoothGatt != null) {
-            mBluetoothGatt.connect();
-            sendMessageToHandler(MSG_PROGRESS, "Connecting on resume");
-        } else {
-            mBluetoothAdapter.startLeScan(this);
-            sendMessageToHandler(MSG_PROGRESS, "Searching for devices");
-        }
+        registerReceiver(mBroadcastReceiver, getGattUpdateIntentFilter());
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        unregisterReceiver(mBroadcastReceiver);
+
         Log.i(LOG_TAG, "onPause");
-        if (mBluetoothAdapter != null) {
-            mBluetoothAdapter.stopLeScan(this);
-        }
+
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        unbindService(mServiceConnection);
         Log.i(LOG_TAG, "onDestroy");
-
-        //Disconnect from any active tag connection
-        if (mBluetoothGatt != null) {
-            mBluetoothGatt.close();
-        }
     }
 
     @Override
-    public void onLeScan(BluetoothDevice bluetoothDevice, int i, byte[] bytes) {
-        if (bluetoothDevice.getAddress().equals(BOARD_ADDRESS)) {
-            mBluetoothAdapter.stopLeScan(this);
-            mBluetoothGatt = bluetoothDevice.connectGatt(getApplicationContext(), true, mGattCallback);
-            sendMessageToHandler(MSG_PROGRESS, "Connecting to board");
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        // User chose not to enable Bluetooth.
+        if (requestCode == BLUETOOTH_ENABLE_RESULT_CODE && resultCode == Activity.RESULT_CANCELED) {
+            finish();
+            return;
         }
+
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
-    private final BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
+
+    private final BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status,
-                                            int newState) {
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                if (gatt.discoverServices()) {
-                    sendMessageToHandler(MSG_PROGRESS, "Discovering services");
-                } else {
-                    Log.w(LOG_TAG, "Failed to start discovering services");
-                }
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                sendMessageToHandler(MSG_GATT_DISCONNECTED);
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+
+            if (action == null){
+                Log.w(LOG_TAG, "Action is null");
             }
-        }
 
-        @Override
-        // New services discovered
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                BluetoothGattService gattService = gatt.getService(SERVICE_UUID);
-
-                if (gattService == null) {
-                    Log.w(LOG_TAG, "Service does not exist");
-                    return;
-                }
-
-                mGattCharacteristic = gattService.getCharacteristic(CHARACTERISTIC_UUID);
-
-                if (mGattCharacteristic == null) {
-                    Log.w(LOG_TAG, "Characteristic does not exist");
-                    return;
-                }
-
-                gatt.setCharacteristicNotification(mGattCharacteristic, true);
-                sendMessageToHandler(MSG_GATT_CONNECTED);
-
-            } else {
-                Log.w(LOG_TAG, "onServicesDiscovered received: " + status);
-            }
-        }
-
-        @Override
-        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-            super.onCharacteristicRead(gatt, characteristic, status);
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                sendMessageToHandler(MSG_RECEIVED_DATA, characteristic.getValue());
-            } else {
-                Log.w(LOG_TAG, "Failed to read characteristic");
-            }
-        }
-
-        @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            super.onCharacteristicChanged(gatt, characteristic);
-            sendMessageToHandler(MSG_RECEIVED_DATA, characteristic.getValue());
-        }
-
-        @Override
-        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-            super.onCharacteristicWrite(gatt, characteristic, status);
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.i(LOG_TAG, "Sent packet : " + characteristic.getStringValue(0));
-            } else {
-                Log.w(LOG_TAG, "Failed sending packet. Status : " + status);
-            }
-        }
-    };
-
-    private void sendPacket(String value) {
-        if (mBluetoothGatt != null) {
-            mGattCharacteristic.setValue(value.getBytes());
-            mBluetoothGatt.writeCharacteristic(mGattCharacteristic);
-        } else {
-            Log.w(LOG_TAG, "Failed to write characteristic, connection is null");
-        }
-    }
-
-    private void sendMessageToHandler(int what, Object obj) {
-        mHandler.sendMessage(Message.obtain(null, what, obj));
-    }
-
-    private void sendMessageToHandler(int what) {
-        mHandler.sendMessage(Message.obtain(null, what));
-    }
-
-    private final Handler mHandler = new Handler(Looper.getMainLooper()) {
-        @Override
-        public void handleMessage(Message msg) {
-            switch (msg.what) {
-                case MSG_PROGRESS:
-                    String status = (String) msg.obj;
+            switch (intent.getAction()) {
+                case BluetoothService.MSG_PROGRESS:
+                    String status = intent.getStringExtra(BluetoothService.EXTRA_PROGRESS_STRING);
                     updateStatus(status);
-                    Log.i(LOG_TAG, "Handler : " + status);
+                    Log.i(LOG_TAG, "Broadcast : Progress : " + status);
                     break;
-                case MSG_GATT_DISCONNECTED:
-                    Log.i(LOG_TAG, "Handler : Disconnected");
+                case BluetoothService.MSG_GATT_DISCONNECTED:
+                    Log.i(LOG_TAG, "Broadcast : Disconnected");
                     break;
-                case MSG_GATT_CONNECTED:
+                case BluetoothService.MSG_GATT_CONNECTED:
                     updateStatus("Testing connection");
-                    Log.i(LOG_TAG, "Handler : Testing connection");
+                    Log.i(LOG_TAG, "Broadcast : Testing connection");
                     mState = STATE_TESTING_CONNECTION;
-                    sendPacket(Packet.getPacketBegin());
+                    mBluetoothService.writeBLEData(Packet.getPacketBegin());
                     break;
-                case MSG_RECEIVED_DATA:
-                    if (msg.obj == null) {
-                        Log.w(LOG_TAG, "Handler called but no data passed");
+                case BluetoothService.MSG_RECEIVED_DATA:
+                    byte[] data = intent.getByteArrayExtra(BluetoothService.EXTRA_BLE_DATA);
+                    if (data == null) {
+                        Log.w(LOG_TAG, "Broadcast called but no data passed");
                         return;
                     }
 
-                    parseData(new String((byte[]) msg.obj));
-                    Log.i(LOG_TAG, "Received packet : " + new String((byte[]) msg.obj));
+                    parseData(new String(data));
             }
         }
     };
 
     private void parseData(@NonNull String data) {
-        if (isAcknowledge(data)) {
+        if (Packet.isAcknowledge(data)) {
             gotAcknowledged();
-        } else if (Packet.BUTTON_PRESSED == Packet.getCommandByte(data) && Packet.isValid(data)) {
+        } else if (Packet.isValidPacket(data) && Packet.isButtonPressed(data)) {
             buttonPressed(Packet.getButtonNumber(data));
         } else {
-            Log.w(LOG_TAG, "Could not parse data");
+            Log.w(LOG_TAG, "Could not parse data : " + Packet.formatForPrint(data));
         }
-    }
-
-    private void buttonPressed(int buttonNumber) {
-        Log.i(LOG_TAG, "Button number " + buttonNumber + " pressed");
-        if (buttonNumber == mLedNumberToPress && mState == STATE_INGAME) {
-            String dataToSend = ACKNOWLEDGE + Packet.getPacketLedOff(mLedNumberToPress);
-            mLedNumberToPress = getRandomLedNumber();
-            dataToSend += Packet.getPacketLedOn(mLedNumberToPress);
-            dataToSend += Packet.getPacketShift();
-
-            sendPacket(dataToSend);
-        }
-    }
-
-    private static boolean isAcknowledge(String packet) {
-        return packet.length() == 1 && packet.charAt(0) == ACKNOWLEDGE;
     }
 
     private void gotAcknowledged() {
@@ -296,9 +186,29 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         }
     }
 
-    private CountDownTimer mGameTimer = new CountDownTimer(30000, 10) {
+    private void buttonPressed(int buttonNumber) {
+        Log.i(LOG_TAG, "Button number " + buttonNumber + " pressed");
+        if (buttonNumber == mLedNumberToPress && mState == STATE_INGAME) {
+            String dataToSend = Packet.getAcknowledge() + Packet.getPacketLedOff(mLedNumberToPress);
 
-        NumberFormat formatter = new DecimalFormat("#0.000");
+            mLedNumberToPress = getRandomLedNumber();
+
+            dataToSend += Packet.getPacketLedOn(mLedNumberToPress) + Packet.getPacketShift();
+
+            mBluetoothService.writeBLEData(dataToSend);
+        }
+    }
+
+    private void startGame() {
+        mState = STATE_INGAME;
+        mGameTimer.start();
+        mLedNumberToPress = getRandomLedNumber();
+        mBluetoothService.writeBLEData(Packet.getPacketLedOn(mLedNumberToPress) + Packet.getPacketShift());
+    }
+
+    private final CountDownTimer mGameTimer = new CountDownTimer(30000, 10) {
+
+        private final NumberFormat formatter = new DecimalFormat("#0.000");
 
         @Override
         public void onTick(long l) {
@@ -309,23 +219,25 @@ public class GameActivity extends AppCompatActivity implements BluetoothAdapter.
         public void onFinish() {
             countDownTimer.setText("0.000");
             mState = STATE_GAME_ENDED;
-            String dataToSend = Packet.getPacketLedOff(mLedNumberToPress);
-            dataToSend += Packet.getPacketEnd();
 
-            sendPacket(dataToSend);
+            mBluetoothService.writeBLEData(Packet.getPacketLedOff(mLedNumberToPress) + Packet.getPacketShift() + Packet.getPacketEnd());
         }
     };
-
-    private void startGame() {
-        mState = STATE_INGAME;
-        mGameTimer.start();
-        mLedNumberToPress = getRandomLedNumber();
-        sendPacket(Packet.getPacketLedOn(mLedNumberToPress) + Packet.getPacketShift());
-    }
 
     private static int getRandomLedNumber() {
         return (int) (Math.random() * 64);
     }
+
+
+    private static IntentFilter getGattUpdateIntentFilter() {
+        final IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(BluetoothService.MSG_PROGRESS);
+        intentFilter.addAction(BluetoothService.MSG_GATT_CONNECTED);
+        intentFilter.addAction(BluetoothService.MSG_GATT_DISCONNECTED);
+        intentFilter.addAction(BluetoothService.MSG_RECEIVED_DATA);
+        return intentFilter;
+    }
+
 
     public void cancelConnect(View view) {
         finish();

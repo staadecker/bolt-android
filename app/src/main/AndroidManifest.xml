@@ -30,8 +30,12 @@
             android:configChanges="orientation|keyboardHidden"
             android:parentActivityName=".MainActivity"
             android:screenOrientation="userLandscape"
-            android:theme="@style/NoActionBar"/>
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+        <service
+            android:name=".BluetoothService"
+            android:enabled="true"
+            android:exported="true"/>
     </application>
 
 </manifest>
