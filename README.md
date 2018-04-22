@@ -18,4 +18,4 @@ If complete, the Android app will be able to control the game by deciding when t
 
 ### Bluetooth
 
-To communicate via bluetooth the Arduino and the Android phone send each other packets. The packet's format is defined in the `bluetooth-protocol.md` file of the Arduino repository, [here](https://github.com/SUPERETDUPER/bolt-arduino).
+To communicate via bluetooth the Arduino and the Android phone send each other packets. The packet's format is defined in the `bluetooth-protocol.md` file of the Arduino repository, [here](https://github.com/SUPERETDUPER/bolt-arduino/blob/master/bluetooth-protocol.md).
