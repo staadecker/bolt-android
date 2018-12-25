@@ -1,3 +1,5 @@
+# CODE MOVED TO REPO: "BOLT"
+
 # BOLT (Android)
 
 WARNING : This code is not finished and/or fully functionnal!
